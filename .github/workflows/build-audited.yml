@@ -1,0 +1,70 @@
+name: Build SoundKeeper (audited source)
+
+# Builds SoundKeeper x64 Release from the audited upstream source.
+# Only CI YAML and firewall helper scripts are added by the fork owner —
+# NONE of the C/C++ source that produces the binary is modified.
+# Compiler toolset is pinned to v143 (VS 2022) because GitHub runners may
+# not ship the project's native v145 (VS 2026) toolset. This changes the
+# compiler version, not the audited source.
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record source provenance
+        shell: pwsh
+        run: |
+          "Building commit: $(git rev-parse HEAD)" | Tee-Object provenance.txt
+          "Audited commit : 1fa5049f9d69003dbb4c116cc9305d25891d1c37" | Tee-Object -Append provenance.txt
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: List installed MSVC toolsets (diagnostic)
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          Get-ChildItem "$vs\VC\Tools\MSVC" -ErrorAction SilentlyContinue | Select-Object Name
+
+      - name: Build x64 Release
+        shell: pwsh
+        run: |
+          msbuild SoundKeeper.vcxproj `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /p:PlatformToolset=v143 `
+            /p:WindowsTargetPlatformVersion=10.0 `
+            /m
+
+      - name: Locate built exe
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Recurse -Filter SoundKeeper64.exe | Select-Object -First 1
+          if (-not $exe) { throw "SoundKeeper64.exe not found after build" }
+          "EXE_PATH=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Built: $($exe.FullName)  ($([math]::Round($exe.Length/1KB,1)) KB)"
+
+      - name: Stage artifact (exe + firewall scripts + provenance)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item $env:EXE_PATH dist\
+          Copy-Item tools\Block-SoundKeeper-Outbound.ps1   dist\
+          Copy-Item tools\Unblock-SoundKeeper-Outbound.ps1 dist\
+          Copy-Item provenance.txt dist\
+          Copy-Item ReadMe.txt dist\ -ErrorAction SilentlyContinue
+          Copy-Item License.md dist\ -ErrorAction SilentlyContinue
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SoundKeeper-win-x64-audited-build
+          path: dist/
