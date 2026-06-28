@@ -3,6 +3,11 @@
 
 #include "CSoundKeeper.hpp"
 
+#if !IS_WIN_CUI
+#include "Resources.hpp"
+#include "Tray.hpp"
+#endif
+
 // ---------------------------------------------------------------------------------------------------------------------
 
 //
@@ -1245,6 +1250,17 @@ HRESULT CSoundKeeper::Main()
 			DebugLogWarning("Unable to register for user session notifications.");
 		}
 	}
+
+#if !IS_WIN_CUI
+
+	// System tray icon (GUI build) so the user can see it is running and exit it.
+	// Pumped by the message loop below; removed automatically on scope exit.
+	TrayIcon tray;
+	tray.Create(THIS_MODULE, IDI_MAIN, L"Sound Keeper (running)",
+		[](void* ctx) { static_cast<CSoundKeeper*>(ctx)->FireShutdown(); }, this);
+	defer [&] { tray.Destroy(); };
+
+#endif
 
 	// Working loop.
 
